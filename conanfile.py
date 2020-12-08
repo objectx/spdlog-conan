@@ -80,7 +80,7 @@ class SpdlogConan(ConanFile):
         self._cmake.definitions["SPDLOG_NO_EXCEPTIONS"] = self.options.no_exceptions
         if self.settings.os in ("iOS", "tvOS", "watchOS"):
             self._cmake.definitions["SPDLOG_NO_TLS"] = True
-        self._cmake.configure()
+        self._cmake.configure(source_folder=self._source_subfolder)
         return self._cmake
 
     def _disable_werror(self):
@@ -90,7 +90,7 @@ class SpdlogConan(ConanFile):
         if Version(self.version) < "1.7" and Version(self.deps_cpp_info["fmt"].version) >= "7":
             raise ConanInvalidConfiguration("The project {}/{} requires fmt < 7.x".format(self.name, self.version))
 
-        self._disable_werror()
+        # self._disable_werror()
         if not self.options.header_only:
             cmake = self._configure_cmake()
             cmake.build()
