@@ -13,6 +13,7 @@ open Fake.Core
 open Fake.Core.TargetOperators
 open Fake.IO
 open Fake.IO.FileSystemOperators
+open System.Runtime.InteropServices
 
 Target.initEnvironment ()
 
@@ -20,7 +21,6 @@ Target.initEnvironment ()
 // let profile = "vs2019-preview"
 
 let workingDir = __SOURCE_DIRECTORY__ </> "tmp"
-
 
 module BuildEnv =
     type BuildType =
@@ -48,7 +48,15 @@ module BuildEnv =
         |> CmdLine.appendPrefix "--settings" (sprintf "build_type=%s" flavor.Type.AsString)
 
     let buildTypes = [| Debug; Release |]
-    let profiles = [| "default"; "clang-11"; "gcc-10" |]
+    let profiles =
+        if RuntimeInformation.IsOSPlatform OSPlatform.OSX then
+            [| "default"; "clang-11"; "gcc-10" |]
+        elif RuntimeInformation.IsOSPlatform OSPlatform.Linux then
+            [| "default" |]
+        elif RuntimeInformation.IsOSPlatform OSPlatform.Windows then
+            [| "vs2019"; "vs2019-preview" |]
+        else
+            failwith "unknown host platform"
 
     let flavors =
         Seq.allPairs profiles buildTypes
