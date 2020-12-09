@@ -80,7 +80,7 @@ class SpdlogConan(ConanFile):
         self._cmake.definitions["SPDLOG_NO_EXCEPTIONS"] = self.options.no_exceptions
         if self.settings.os in ("iOS", "tvOS", "watchOS"):
             self._cmake.definitions["SPDLOG_NO_TLS"] = True
-        self._cmake.configure(source_folder=self._source_subfolder)
+        self._cmake.configure()
         return self._cmake
 
     def _disable_werror(self):

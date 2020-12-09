@@ -54,7 +54,7 @@ module BuildEnv =
         elif RuntimeInformation.IsOSPlatform OSPlatform.Linux then
             [| "default" |]
         elif RuntimeInformation.IsOSPlatform OSPlatform.Windows then
-            [| "vs2019"; "vs2019-preview" |]
+            [| "vs2019-preview" |]
         else
             failwith "unknown host platform"
 
@@ -77,10 +77,12 @@ Target.create "EnsureWorkingDir"
 
 Target.create "Source"
 <| fun _ ->
+    let srcDir = workingDir </> "source"
+    Shell.rm_rf srcDir
     CmdLine.empty
     |> CmdLine.append "source"
     |> CmdLine.append __SOURCE_DIRECTORY__
-    |> CmdLine.appendPrefix "--source-folder" (workingDir </> "source")
+    |> CmdLine.appendPrefix "--source-folder" srcDir
     |> CmdLine.toArray
     |> CreateProcess.fromRawCommand "conan"
     |> CreateProcess.ensureExitCode
