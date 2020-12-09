@@ -14,26 +14,61 @@ open Fake.Core.TargetOperators
 open Fake.IO
 open Fake.IO.FileSystemOperators
 
-Target.initEnvironment()
+Target.initEnvironment ()
+
+// let profile = "clang-11"
+// let profile = "vs2019-preview"
 
 let workingDir = __SOURCE_DIRECTORY__ </> "tmp"
 
-let buildTypes = [|"Debug"; "Release"|]
+
+module BuildEnv =
+    type BuildType =
+        | Debug
+        | Release
+        member self.AsString =
+            match self with
+            | Debug -> "Debug"
+            | Release -> "Release"
+    type Flavor =
+        { Profile: string
+          Type: BuildType }
+
+    let makeFolderName (pfx: string) (flavor: Flavor) =
+        workingDir </> (sprintf "%s.%s-%s" pfx flavor.Profile flavor.Type.AsString)
+    let buildFolder (flavor: Flavor): string =
+        makeFolderName "Build" flavor
+    let packageFolder (flavor: Flavor): string =
+        makeFolderName "Package" flavor
+    let taskName (pfx: string) (flavor: Flavor): string = sprintf "%s.%s-%s" pfx flavor.Profile flavor.Type.AsString
+
+    let toSetting (flavor: Flavor) (c: CmdLine): CmdLine =
+        c
+        |> CmdLine.appendPrefix "--profile" flavor.Profile
+        |> CmdLine.appendPrefix "--settings" (sprintf "build_type=%s" flavor.Type.AsString)
+
+    let buildTypes = [| Debug; Release |]
+    let profiles = [| "default"; "clang-11"; "gcc-10" |]
+
+    let flavors =
+        Seq.allPairs profiles buildTypes
+        |> Seq.map (fun (p, t) -> { Profile = p; Type = t })
 //let buildTypes = [|"Debug"|]
 
 Target.create "Rebuild" ignore
 
-Target.create "Clean" <| fun _ ->
-    Shell.rm_rf workingDir
+Target.create "Clean"
+<| fun _ -> Shell.rm_rf workingDir
 
 "Clean" ==> "Rebuild"
 
-Target.create "EnsureWorkingDir" <| fun _ ->
-    Directory.ensure workingDir
+Target.create "EnsureWorkingDir"
+<| fun _ -> Directory.ensure workingDir
 
 "Clean" ?=> "EnsureWorkingDir"
 
-Target.create "Source" <| fun _ ->
+Target.create "Source"
+<| fun _ ->
     CmdLine.empty
     |> CmdLine.append "source"
     |> CmdLine.append __SOURCE_DIRECTORY__
@@ -48,33 +83,38 @@ Target.create "Source" <| fun _ ->
 
 Target.create "Install" ignore
 
-let installTask (buildType: string) =
-    let taskName = sprintf "Install.%s" buildType
-    let installDir = workingDir </> (sprintf "Build.%s" buildType)
-    Target.create taskName <| fun _ ->
+let installTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Install"
+    let installDir = flavor |> BuildEnv.buildFolder
+
+    Target.create taskName
+    <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "install"
         |> CmdLine.append __SOURCE_DIRECTORY__
-        |> CmdLine.appendPrefix "--profile" "vs2019-preview"
         |> CmdLine.appendPrefix "--install-folder" installDir
-        |> CmdLine.appendPrefix "--settings" (sprintf "build_type=%s" buildType)
+        |> CmdLine.appendPrefix "--build" "fmt"
+        |> BuildEnv.toSetting flavor
         |> CmdLine.toArray
         |> CreateProcess.fromRawCommand "conan"
         |> CreateProcess.ensureExitCode
         |> Proc.run
         |> ignore
+
     "Source" ?=> taskName |> ignore
     taskName ==> "Install" |> ignore
 
-buildTypes |> Seq.iter installTask
+BuildEnv.flavors |> Seq.iter installTask
 
 Target.create "Build" ignore
 
-let buildTask (buildType: string) =
-    let taskName = sprintf "Build.%s" buildType
+let buildTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Build"
     let sourceDir = workingDir </> "source"
-    let buildDir = workingDir </> taskName
-    Target.create taskName <| fun _ ->
+    let buildDir = flavor |> BuildEnv.buildFolder
+
+    Target.create taskName
+    <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "build"
         |> CmdLine.append __SOURCE_DIRECTORY__
@@ -85,19 +125,25 @@ let buildTask (buildType: string) =
         |> CreateProcess.ensureExitCode
         |> Proc.run
         |> ignore
-    (sprintf "Install.%s" buildType) ==> taskName |> ignore
+
+    (flavor |> BuildEnv.taskName "Install")
+    ==> taskName
+    |> ignore
+
     taskName ==> "Build" |> ignore
 
-buildTypes |> Seq.iter buildTask
+BuildEnv.flavors |> Seq.iter buildTask
 
 Target.create "Package" ignore
 
-let packageTask (buildType: string) =
-    let taskName = sprintf "Package.%s" buildType
+let packageTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Package"
     let sourceDir = workingDir </> "source"
-    let buildDir = workingDir </> (sprintf "Build.%s" buildType)
-    let packageDir = workingDir </> (sprintf "Package.%s" buildType)
-    Target.create taskName <| fun _ ->
+    let buildDir = flavor |> BuildEnv.buildFolder
+    let packageDir = flavor |> BuildEnv.packageFolder
+
+    Target.create taskName
+    <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "package"
         |> CmdLine.append __SOURCE_DIRECTORY__
@@ -109,19 +155,25 @@ let packageTask (buildType: string) =
         |> CreateProcess.ensureExitCode
         |> Proc.run
         |> ignore
-    (sprintf "Build.%s" buildType) ==> taskName |> ignore
+
+    (flavor |> BuildEnv.taskName "Build")
+    ==> taskName
+    |> ignore
+
     taskName ==> "Package" |> ignore
 
-buildTypes |> Seq.iter packageTask
+BuildEnv.flavors |> Seq.iter packageTask
 
 Target.create "Export" ignore
 
-let exportTask (buildType: string) =
-    let taskName = sprintf "Export.%s" buildType
+let exportTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Export"
     let sourceDir = workingDir </> "source"
-    let buildDir = workingDir </> (sprintf "Build.%s" buildType)
-    let packageDir = workingDir </> (sprintf "Package.%s" buildType)
-    Target.create taskName <| fun _ ->
+    let buildDir = flavor |> BuildEnv.buildFolder
+    let packageDir = flavor |> BuildEnv.packageFolder
+
+    Target.create taskName
+    <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "export-pkg"
         |> CmdLine.append "--force"
@@ -130,59 +182,71 @@ let exportTask (buildType: string) =
         // |> CmdLine.appendPrefix "--source-folder" sourceDir
         // |> CmdLine.appendPrefix "--build-folder" buildDir
         |> CmdLine.appendPrefix "--package-folder" packageDir
-        |> CmdLine.appendPrefix "--profile" "vs2019-preview"
-        |> CmdLine.appendPrefix "--settings" (sprintf "build_type=%s" buildType)
+        |> BuildEnv.toSetting flavor
         |> CmdLine.toArray
         |> CreateProcess.fromRawCommand "conan"
         |> CreateProcess.ensureExitCode
         |> Proc.run
         |> ignore
-    (sprintf "Package.%s" buildType) ==> taskName |> ignore
+
+    (flavor |> BuildEnv.taskName "Package")
+    ==> taskName
+    |> ignore
+
     taskName ==> "Export" |> ignore
 
-
-buildTypes |> Seq.iter exportTask
+BuildEnv.flavors |> Seq.iter exportTask
 
 Target.create "Test" ignore
 
-let testTask (buildType: string) =
-    let taskName = sprintf "Test.%s" buildType
-    Target.create taskName <| fun _ ->
+let testTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Test"
+
+    Target.create taskName
+    <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "test"
         |> CmdLine.append "test_package"
         |> CmdLine.append "spdlog/20201126@objectx/testing"
-        |> CmdLine.appendPrefix "--settings" (sprintf "build_type=%s" buildType)
+        |> BuildEnv.toSetting flavor
         |> CmdLine.toArray
         |> CreateProcess.fromRawCommand "conan"
         |> CreateProcess.ensureExitCode
         |> Proc.run
         |> ignore
-    (sprintf "Export.%s" buildType) ==> taskName |> ignore
+
+    (flavor |> BuildEnv.taskName "Export")
+    ==> taskName
+    |> ignore
+
     taskName ==> "Test" |> ignore
 
-buildTypes |> Seq.iter testTask
+BuildEnv.flavors |> Seq.iter testTask
 
 Target.create "Create" ignore
 
-let createTask (buildType: string) =
-    let taskName = sprintf "Create.%s" buildType
-    Target.create taskName <| fun _ ->
+let createTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Create"
+
+    Target.create taskName
+    <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "create"
         |> CmdLine.append __SOURCE_DIRECTORY__
         |> CmdLine.append "objectx/testing"
-        |> CmdLine.appendPrefix "--settings" (sprintf "build_type=%s" buildType)
+        |> BuildEnv.toSetting flavor
         |> CmdLine.toArray
         |> CreateProcess.fromRawCommand "conan"
         |> CreateProcess.ensureExitCode
         |> Proc.run
         |> ignore
+
     taskName ==> "Create" |> ignore
 // "Test" ==> "Create" |> ignore
 
-buildTypes |> Seq.iter createTask
+BuildEnv.flavors |> Seq.iter createTask
 "Source" ==> "Rebuild"
-"Create" ==> "Rebuild"
+"Test" ==> "Rebuild"
+// "Create" ==> "Rebuild"
 
 Target.runOrDefaultWithArguments "Rebuild"
